@@ -1,15 +1,15 @@
 @echo off
 :: ============================================================
-::  Corner Awake – installer + launcher
+::  Corner Awake - installer + launcher
 ::  Run this once.  After that you can launch corner_awake.pyw
-::  directly (or add it to your Startup folder).
+::  directly (or use run.cmd).
 :: ============================================================
 
-title Corner Awake – Setup
+title Corner Awake - Setup
 
 echo.
 echo  ================================================
-echo   Corner Awake – Installing dependencies...
+echo   Corner Awake - Installing dependencies...
 echo  ================================================
 echo.
 
@@ -48,11 +48,10 @@ start "" pythonw "%~dp0corner_awake.pyw"
 echo  Done!  Look for the grey circle in your system tray.
 echo.
 echo  Usage:
-echo    - Drag mouse to LOWER-RIGHT corner  ^→  sleep blocked  (rising beep + green icon)
-echo    - Move mouse away                   ^→  sleep allowed  (falling beep + grey icon)
-echo    - Right-click tray icon ^→ Quit
+echo    - Hold mouse in LOWER-RIGHT corner -- sleep blocked  (rising beep + green icon)
+echo    - Move mouse away                  -- sleep allowed  (falling beep + grey icon)
+echo    - Right-click tray icon -- Settings / Quit
 echo.
-echo  To run on Windows startup, place a shortcut to corner_awake.pyw in:
-echo    %%APPDATA%%\Microsoft\Windows\Start Menu\Programs\Startup
+echo  After first run, use run.cmd to launch without reinstalling.
 echo.
 timeout /t 5 >nul
