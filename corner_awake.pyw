@@ -190,7 +190,7 @@ class CornerAwakeApp:
 
     # ── Menu ──────────────────────────────────────────────────────────────────
 
-    def _status_label(self) -> str:
+    def _status_label(self, _item=None) -> str:
         if self._active:
             return "⚡ Sleep is BLOCKED"
         return f"Corner Awake  –  inactive (hold {self._settings['hold_seconds']:g}s)"
