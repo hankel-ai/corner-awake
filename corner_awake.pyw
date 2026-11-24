@@ -1,30 +1,48 @@
 """
 corner_awake.pyw
 -----------------
-Sits in the system tray and prevents the PC from sleeping whenever the mouse
-cursor is held in the lower-right corner of the screen for the configured
-hold duration (default 1 second).
+Sits in the system tray (Windows) or menu bar (macOS) and prevents the
+computer from sleeping whenever the mouse cursor is held in the lower-right
+corner of the screen for the configured hold duration (default 1 second).
 
-Works over RDP (SetThreadExecutionState keeps the session alive).
+Windows: SetThreadExecutionState keeps the session alive (works over RDP).
+macOS:   a `caffeinate -d -i` child process holds the sleep block.
 Audible beeps signal activation / deactivation.
 
 Tray icon:
   Grey  = inactive (normal sleep allowed)
   Green = active   (sleep blocked)
 
-Right-click the tray icon for Settings (start with Windows, hold duration)
-or Quit.
+Right-click (Windows) / click (macOS) the icon for Settings (start at login,
+hold duration) or Quit.
 """
 
 import json
+import math
 import os
+import plistlib
+import struct
+import subprocess
 import sys
+import tempfile
 import threading
 import time
 import ctypes
-import winreg
-import winsound
-from ctypes import wintypes
+import wave
+
+IS_WINDOWS = sys.platform == "win32"
+IS_MAC     = sys.platform == "darwin"
+
+if IS_WINDOWS:
+    import winreg
+    import winsound
+    from ctypes import wintypes
+elif IS_MAC:
+    import AppKit
+    import Quartz
+    from PyObjCTools import AppHelper
+else:
+    sys.exit("Corner Awake supports Windows and macOS only.")
 
 import pystray
 from PIL import Image, ImageDraw, ImageFont
@@ -52,7 +70,7 @@ APP_DIR        = os.path.dirname(os.path.abspath(__file__))
 SETTINGS_FILE  = os.path.join(APP_DIR, "settings.json")
 DEFAULTS = {
     "hold_seconds": 1.0,
-    "start_with_windows": False,
+    "start_with_windows": False,   # also means "start at login" on macOS
 }
 HOLD_PRESETS = [0.5, 1.0, 2.0, 3.0, 5.0]
 
@@ -60,12 +78,28 @@ HOLD_PRESETS = [0.5, 1.0, 2.0, 3.0, 5.0]
 RUN_REG_KEY  = r"Software\Microsoft\Windows\CurrentVersion\Run"
 RUN_REG_NAME = "CornerAwake"
 
+# macOS "start at login" LaunchAgent
+LAUNCH_AGENT_LABEL = "com.cornerawake"
+LAUNCH_AGENT_PATH  = os.path.expanduser(
+    f"~/Library/LaunchAgents/{LAUNCH_AGENT_LABEL}.plist")
+
+# macOS uses pre-rendered copies of the Windows icons so both look identical
+# (Segoe UI, used to draw the Windows icon, is not installed on macOS).
+ICON_FILES = {
+    True:  os.path.join(APP_DIR, "icon_active.png"),
+    False: os.path.join(APP_DIR, "icon_inactive.png"),
+}
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _play_beeps(sequence):
     """Play a list of (freq, ms) beeps in a daemon thread so the monitor loop
     is not blocked."""
+    if IS_MAC:
+        _play_beeps_mac(sequence)
+        return
+
     def _run():
         for freq, ms in sequence:
             try:
@@ -76,8 +110,53 @@ def _play_beeps(sequence):
     t.start()
 
 
+def _write_tone_wav(sequence, path, rate=44100, volume=0.3):
+    """Write the (freq, ms) beep sequence as a 16-bit mono sine-wave WAV.
+    A 5 ms fade at each tone edge prevents clicks."""
+    fade = int(rate * 0.005)
+    frames = bytearray()
+    for freq, ms in sequence:
+        n = int(rate * ms / 1000)
+        for i in range(n):
+            env = min(1.0, i / fade, (n - 1 - i) / fade)
+            sample = volume * env * math.sin(2 * math.pi * freq * i / rate)
+            frames += struct.pack("<h", int(32767 * sample))
+    with wave.open(path, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes(bytes(frames))
+
+
+_tone_files = {}
+
+
+def _play_beeps_mac(sequence):
+    """macOS has no winsound.Beep: render the same tones to a WAV once, then
+    play it with afplay (non-blocking child process)."""
+    try:
+        key = tuple(sequence)
+        path = _tone_files.get(key)
+        if path is None:
+            name = "corner_awake_%s.wav" % "_".join(f"{f}-{ms}" for f, ms in key)
+            path = os.path.join(tempfile.gettempdir(), name)
+            _write_tone_wav(sequence, path)
+            _tone_files[key] = path
+        subprocess.Popen(["afplay", path],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception:
+        pass
+
+
 def _make_icon(active: bool) -> Image.Image:
     """Render a 64×64 RGBA tray icon.  Green circle = active, grey = inactive."""
+    if IS_MAC:
+        try:
+            with Image.open(ICON_FILES[active]) as png:
+                return png.convert("RGBA")
+        except Exception:
+            pass  # PNG missing: draw it below with whatever font exists
+
     size = 64
     img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
@@ -87,20 +166,25 @@ def _make_icon(active: bool) -> Image.Image:
     d.ellipse([2, 2, 61, 61], fill=(*fill[:3], 60))
     d.ellipse([6, 6, 57, 57], fill=fill, outline=COLOR_RING, width=2)
 
+    symbol = "⚡" if active else "Zzz"
+    # Segoe UI has no ⚡ glyph (it draws an empty box); Segoe UI Symbol does.
+    font_file, font_size = ("seguisym.ttf", 36) if active else ("segoeui.ttf", 22)
     try:
-        font = ImageFont.truetype("segoeui.ttf", 22)
+        font = ImageFont.truetype(font_file, font_size)
     except Exception:
         font = ImageFont.load_default()
 
-    symbol = "⚡" if active else "Zzz"
+    ox = oy = 0
     try:
         bbox = d.textbbox((0, 0), symbol, font=font)
         tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+        if active:
+            ox, oy = bbox[0], bbox[1]   # centre the glyph's ink, not its cell
     except AttributeError:
         tw, th = d.textsize(symbol, font=font)
 
-    x = (size - tw) // 2
-    y = (size - th) // 2
+    x = (size - tw) // 2 - ox
+    y = (size - th) // 2 - oy
     d.text((x, y), symbol, fill=COLOR_TEXT, font=font)
 
     return img
@@ -132,7 +216,7 @@ def _save_settings(settings: dict) -> None:
         pass
 
 
-# ── Start with Windows (registry) ────────────────────────────────────────────
+# ── Start at login (Windows registry / macOS LaunchAgent) ────────────────────
 
 def _startup_command() -> str:
     """Build the command that should run on login: pythonw + this script."""
@@ -147,7 +231,43 @@ def _startup_command() -> str:
     return f'"{pythonw}" "{script}"'
 
 
+def _launch_agent_plist() -> bytes:
+    return plistlib.dumps({
+        "Label": LAUNCH_AGENT_LABEL,
+        "ProgramArguments": [sys.executable, os.path.abspath(__file__)],
+        "RunAtLoad": True,
+        "ProcessType": "Interactive",
+    })
+
+
+def _set_launch_agent(enabled: bool) -> None:
+    try:
+        if enabled:
+            data = _launch_agent_plist()
+            # Rewrite only on change: every write re-triggers the macOS
+            # "Background Items Added" notification.
+            try:
+                with open(LAUNCH_AGENT_PATH, "rb") as f:
+                    if f.read() == data:
+                        return
+            except FileNotFoundError:
+                pass
+            os.makedirs(os.path.dirname(LAUNCH_AGENT_PATH), exist_ok=True)
+            with open(LAUNCH_AGENT_PATH, "wb") as f:
+                f.write(data)
+        else:
+            try:
+                os.remove(LAUNCH_AGENT_PATH)
+            except FileNotFoundError:
+                pass
+    except Exception:
+        pass
+
+
 def _set_run_on_startup(enabled: bool) -> None:
+    if IS_MAC:
+        _set_launch_agent(enabled)
+        return
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_REG_KEY, 0,
                             winreg.KEY_SET_VALUE) as k:
@@ -161,6 +281,41 @@ def _set_run_on_startup(enabled: bool) -> None:
                     pass
     except Exception:
         pass
+
+
+# ── macOS helpers ────────────────────────────────────────────────────────────
+
+_caffeinate_proc = None
+
+
+def _mac_set_sleep_blocked(blocked: bool) -> None:
+    """Hold a `caffeinate -d -i` child while blocked (display + idle sleep,
+    the same pair as ES_DISPLAY_REQUIRED | ES_SYSTEM_REQUIRED).
+    `-w <our pid>` makes caffeinate exit by itself if this app dies."""
+    global _caffeinate_proc
+    running = _caffeinate_proc is not None and _caffeinate_proc.poll() is None
+    if blocked:
+        if not running:
+            _caffeinate_proc = subprocess.Popen(
+                ["caffeinate", "-d", "-i", "-w", str(os.getpid())],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    else:
+        if running:
+            _caffeinate_proc.terminate()
+            try:
+                _caffeinate_proc.wait(timeout=2)
+            except Exception:
+                _caffeinate_proc.kill()
+        _caffeinate_proc = None
+
+
+def _on_ui_thread(fn) -> None:
+    """AppKit is not thread-safe: on macOS, icon/menu updates from the monitor
+    thread must run on the main thread.  Windows calls straight through."""
+    if IS_MAC:
+        AppHelper.callAfter(fn)
+    else:
+        fn()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -216,7 +371,7 @@ class CornerAwakeApp:
 
         settings_menu = pystray.Menu(
             pystray.MenuItem(
-                "Start with Windows",
+                "Start with Windows" if IS_WINDOWS else "Start at login",
                 self._toggle_start_with_windows,
                 checked=lambda _i: bool(self._settings.get("start_with_windows")),
             ),
@@ -262,21 +417,31 @@ class CornerAwakeApp:
     def _make_hold_checker(self, value: float):
         return lambda _i: float(self._settings.get("hold_seconds", 1.0)) == value
 
-    # ── Windows helpers ───────────────────────────────────────────────────────
+    # ── Platform helpers ──────────────────────────────────────────────────────
 
     @staticmethod
     def _screen_size():
+        if IS_MAC:
+            # Main display, in points, origin top-left (same as cursor coords)
+            b = Quartz.CGDisplayBounds(Quartz.CGMainDisplayID())
+            return b.size.width, b.size.height
         u = ctypes.windll.user32
         return u.GetSystemMetrics(0), u.GetSystemMetrics(1)
 
     @staticmethod
     def _cursor_pos():
+        if IS_MAC:
+            p = Quartz.CGEventGetLocation(Quartz.CGEventCreate(None))
+            return p.x, p.y
         pt = wintypes.POINT()
         ctypes.windll.user32.GetCursorPos(ctypes.byref(pt))
         return pt.x, pt.y
 
     @staticmethod
     def _set_sleep_blocked(blocked: bool):
+        if IS_MAC:
+            _mac_set_sleep_blocked(blocked)
+            return
         flags = ES_CONTINUOUS
         if blocked:
             flags |= ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED
@@ -284,18 +449,20 @@ class CornerAwakeApp:
 
     # ── Monitor loop ──────────────────────────────────────────────────────────
 
+    def _show_state(self):
+        self._icon.icon = _make_icon(self._active)
+        self._refresh_menu()
+
     def _activate(self):
         self._active = True
         self._set_sleep_blocked(True)
-        self._icon.icon = _make_icon(True)
-        self._refresh_menu()
+        _on_ui_thread(self._show_state)
         _play_beeps(BEEP_ACTIVATE)
 
     def _deactivate(self):
         self._active = False
         self._set_sleep_blocked(False)
-        self._icon.icon = _make_icon(False)
-        self._refresh_menu()
+        _on_ui_thread(self._show_state)
         _play_beeps(BEEP_DEACTIVATE)
 
     def _monitor_loop(self):
@@ -336,6 +503,10 @@ class CornerAwakeApp:
         icon.stop()
 
     def run(self):
+        if IS_MAC:
+            # Menu-bar-only app: no Dock icon, no app menu
+            AppKit.NSApplication.sharedApplication().setActivationPolicy_(
+                AppKit.NSApplicationActivationPolicyAccessory)
         self._icon.run()
 
 
