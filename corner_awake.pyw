@@ -94,20 +94,19 @@ ICON_FILES = {
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _play_beeps(sequence):
-    """Play a list of (freq, ms) beeps in a daemon thread so the monitor loop
-    is not blocked."""
-    if IS_MAC:
-        _play_beeps_mac(sequence)
-        return
-
-    def _run():
-        for freq, ms in sequence:
-            try:
-                winsound.Beep(freq, ms)
-            except Exception:
-                pass
-    t = threading.Thread(target=_run, daemon=True)
-    t.start()
+    """Play a list of (freq, ms) beeps without blocking the monitor loop.
+    The tones are rendered back to back into one WAV file, so there is no
+    gap between them (separate winsound.Beep calls left an audible gap)."""
+    try:
+        path = _tone_file(sequence)
+        if IS_MAC:
+            subprocess.Popen(["afplay", path],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        else:
+            winsound.PlaySound(path, winsound.SND_FILENAME | winsound.SND_ASYNC
+                               | winsound.SND_NODEFAULT)
+    except Exception:
+        pass
 
 
 def _write_tone_wav(sequence, path, rate=44100, volume=0.3):
@@ -131,21 +130,17 @@ def _write_tone_wav(sequence, path, rate=44100, volume=0.3):
 _tone_files = {}
 
 
-def _play_beeps_mac(sequence):
-    """macOS has no winsound.Beep: render the same tones to a WAV once, then
-    play it with afplay (non-blocking child process)."""
-    try:
-        key = tuple(sequence)
-        path = _tone_files.get(key)
-        if path is None:
-            name = "corner_awake_%s.wav" % "_".join(f"{f}-{ms}" for f, ms in key)
-            path = os.path.join(tempfile.gettempdir(), name)
-            _write_tone_wav(sequence, path)
-            _tone_files[key] = path
-        subprocess.Popen(["afplay", path],
-                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    except Exception:
-        pass
+def _tone_file(sequence) -> str:
+    """Render the beep sequence to a WAV in the temp folder once per run and
+    return its path."""
+    key = tuple(sequence)
+    path = _tone_files.get(key)
+    if path is None:
+        name = "corner_awake_%s.wav" % "_".join(f"{f}-{ms}" for f, ms in key)
+        path = os.path.join(tempfile.gettempdir(), name)
+        _write_tone_wav(sequence, path)
+        _tone_files[key] = path
+    return path
 
 
 def _make_icon(active: bool) -> Image.Image:

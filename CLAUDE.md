@@ -11,7 +11,8 @@ Tray/menu-bar app: hold cursor in lower-right corner for N seconds, then sleep i
 - macOS: `bash install_and_run.sh` (creates `.venv` next to the script), then `bash run.sh` (detached via `nohup`)
 
 ## Rules
-- **Windows behaviour must not change.** Every macOS change goes in an `IS_MAC` branch. Windows code paths stay as they were.
+- **Windows behaviour must not change** unless the owner asks. One approved exception (2026-11-24): the beeps are now gapless on both systems. The old `winsound.Beep` calls left a gap between the tones, and the owner did not want it.
+- Otherwise, every macOS change goes in an `IS_MAC` branch. Windows code paths stay as they were.
 - Verify Windows is unchanged: load `git show <base>:corner_awake.pyw` and the new file with importlib. Compare `_make_icon(True/False).tobytes()` and `_startup_command()` (replace the script path first). Then run `python corner_awake.pyw` for a few seconds to check for errors.
 - macOS cannot be tested from the Windows workstation. The user copies the files to the Mac and reports back.
 
@@ -20,7 +21,7 @@ Tray/menu-bar app: hold cursor in lower-right corner for N seconds, then sleep i
 |---|---|---|
 | Cursor / screen | `GetCursorPos`, `GetSystemMetrics` (primary monitor) | Quartz `CGEventGetLocation`, `CGDisplayBounds(CGMainDisplayID())`, points, top-left origin |
 | Sleep block | `SetThreadExecutionState` | `caffeinate -d -i -w <pid>` child process |
-| Beeps | `winsound.Beep` | Same tones rendered to WAV in `tempfile.gettempdir()`, played with `afplay` |
+| Beeps | Tones rendered back to back into one WAV in `tempfile.gettempdir()`, played with `winsound.PlaySound` (async) | Same WAV, played with `afplay` |
 | Start at login | `HKCU\...\Run\CornerAwake` | `~/Library/LaunchAgents/com.cornerawake.plist` (rewritten only when content changes) |
 | Icon | Drawn live with `segoeui.ttf` / `seguisym.ttf` | `icon_active.png` / `icon_inactive.png` |
 | UI updates from monitor thread | Direct call | `AppHelper.callAfter` (AppKit is not thread-safe) |

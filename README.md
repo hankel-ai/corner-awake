@@ -46,7 +46,9 @@ Sleep is blocked via the Windows **`SetThreadExecutionState`** API
 (`ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED`). On macOS, the app runs
 `caffeinate -d -i -w <app pid>` while active (display + idle sleep blocked).
 `caffeinate` exits by itself if the app dies, so sleep is never left blocked.
-macOS plays the same beep tones from a generated WAV file through `afplay`.
+Both beeps are rendered into one WAV file in the temp folder, so there is no
+gap between the two tones. Windows plays it with `winsound.PlaySound`, macOS
+with `afplay`.
 
 **RDP support:** Run Corner Awake on the **client** machine (the one you're
 sitting at). When you move the client's cursor into its lower-right corner, the
