@@ -33,5 +33,5 @@ echo "  - Hold mouse in LOWER-RIGHT corner -- sleep blocked  (rising beep + gree
 echo "  - Move mouse away                  -- sleep allowed  (falling beep + grey icon)"
 echo "  - Click the menu bar icon -- Settings / Quit"
 echo ""
-echo "macOS has a Quick Note hot corner in the lower-right by default."
-echo "Turn it off: System Settings > Desktop & Dock > Hot Corners."
+echo "If a macOS hot corner is set on the lower-right, it fires too when you hold the mouse there."
+echo "Remove it, or give it a modifier key: System Settings > Desktop & Dock > Hot Corners."

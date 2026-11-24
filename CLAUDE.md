@@ -30,5 +30,5 @@ Tray/menu-bar app: hold cursor in lower-right corner for N seconds, then sleep i
   `python -I -c "import importlib.util as u; s=u.spec_from_file_location('c','corner_awake.pyw'); m=u.module_from_spec(s); s.loader.exec_module(m); m._make_icon(True).save('icon_active.png'); m._make_icon(False).save('icon_inactive.png')"`
 - Segoe UI has no `⚡` glyph (it draws an empty box). The active icon uses `seguisym.ttf` at size 36, centred on the glyph's ink bbox. The inactive "Zzz" icon still uses `segoeui.ttf` at size 22 with the original centring.
 - The settings key `start_with_windows` also controls "Start at login" on macOS. It keeps that name so existing `settings.json` files still work.
-- macOS shows a Quick Note hot corner in the lower-right by default. It conflicts with this app.
+- A macOS hot corner on the lower-right (Quick Note, Mission Control, Application Windows) fires together with this app. The app only reads the cursor position and cannot block the hot corner. Fix: remove the hot corner, or give it a modifier key.
 - `.sh` files must keep LF line endings. `.gitattributes` enforces this.

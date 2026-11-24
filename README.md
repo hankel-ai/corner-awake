@@ -23,8 +23,11 @@ A grey circle appears in the system tray. Right-click it for **Settings** or **Q
    `pystray` pulls in on macOS), and launches the app.
 3. After that, run `bash run.sh` to start it. The app keeps running after you
    close Terminal.
-4. Turn off the default **Quick Note** hot corner, which also uses the
-   lower-right corner: System Settings > Desktop & Dock > Hot Corners.
+4. If a macOS hot corner is set on the lower-right (Quick Note, Mission
+   Control, Application Windows, ...), it fires too when you hold the mouse
+   there. Corner Awake cannot block it. In System Settings > Desktop & Dock >
+   Hot Corners, set it to "-", or hold Cmd/Option/Ctrl/Shift while you pick
+   the action so it fires only with that key held.
 
 The same grey circle appears in the menu bar. Click it for **Settings** or **Quit**.
 
